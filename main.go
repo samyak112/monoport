@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	// "main/sfu"
-	ws "main/signaling"
+	ws "github.com/samyak112/monoport/signaling"
 	// "main/stun"
-	multiplexer "main/udp"
+	multiplexer "github.com/samyak112/monoport/udp"
 )
 
 func main() {

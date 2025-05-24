@@ -3,6 +3,7 @@ package multiplexer
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/samyak112/monoport/stun_server"
 	"log"
 	"net"
 )
@@ -18,9 +19,9 @@ func StartUdpMultiplexer(conn *net.UDPConn) {
 	fmt.Println("UDP listening on 5000")
 	buf := make([]byte, 1500)
 	for {
-		// not using addr parameter here because i guess stun lib and sfu lib will handle that
-		// but I'll add it back here incase its needed and i need to handle the reply manually
-		n, _, err := conn.ReadFromUDP(buf)
+		//n -  buf may be larger than the packet, so only the first n bytes of it are valid data.
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
+		var udpResponse []byte
 		if err != nil {
 			log.Println("UDP read error:", err)
 			continue
@@ -28,11 +29,16 @@ func StartUdpMultiplexer(conn *net.UDPConn) {
 
 		data := buf[:n]
 		if isSTUNPacket(data) {
-			fmt.Println("Reached to stun") // Forward to STUN Server
+			udpResponse, err = stun_server.GetPacket(n, remoteAddr, buf)
+			fmt.Println(udpResponse)
 		} else {
 			fmt.Println("reached the sfu") // Forward to SFU Server
 		}
 
-		// _ = addr // optionally use addr
+		_, err = conn.WriteToUDP(udpResponse, remoteAddr)
+		if err != nil {
+			fmt.Println("Error occured in writing UDP response", err)
+		}
+
 	}
 }
