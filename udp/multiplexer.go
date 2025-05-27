@@ -3,6 +3,8 @@ package multiplexer
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/pion/webrtc/v3"
+	// "github.com/samyak112/monoport/sfu"
 	"github.com/samyak112/monoport/stun_server"
 	"log"
 	"net"
@@ -15,8 +17,8 @@ func isSTUNPacket(data []byte) bool {
 		binary.BigEndian.Uint32(data[4:8]) == 0x2112A442
 }
 
-func StartUdpMultiplexer(conn *net.UDPConn) {
-	fmt.Println("UDP listening on 5000")
+func StartUdpMultiplexer(conn *net.UDPConn, webRtcApi *webrtc.API) {
+	fmt.Println("listenint at 5000 for UDP")
 	buf := make([]byte, 1500)
 	for {
 		//n -  buf may be larger than the packet, so only the first n bytes of it are valid data.
@@ -30,8 +32,8 @@ func StartUdpMultiplexer(conn *net.UDPConn) {
 		data := buf[:n]
 		if isSTUNPacket(data) {
 			udpResponse, err = stun_server.GetPacket(n, remoteAddr, buf)
-			fmt.Println(udpResponse)
 		} else {
+			// sfuResponse, err = sfu_server.SfuServer(conn)
 			fmt.Println("reached the sfu") // Forward to SFU Server
 		}
 

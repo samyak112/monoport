@@ -7,7 +7,6 @@ import (
 )
 
 func GetPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]byte, error) {
-	fmt.Printf("Received %d bytes \n", numBytes)
 	msg := &stun.Message{
 		Raw: make([]byte, numBytes),
 	}
@@ -22,7 +21,6 @@ func GetPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]byte, er
 
 	fmt.Println(msg.Type)
 	if msg.Type == stun.MessageType(stun.BindingRequest) {
-		fmt.Println("Received Binding Request")
 
 		// 5. Construct the STUN Binding Response
 		response, err := stun.Build(
