@@ -2,6 +2,7 @@ package sfu_server
 
 import (
 	"fmt"
+	"github.com/pion/ice/v2"
 	"github.com/pion/webrtc/v3"
 	"net"
 )
@@ -22,8 +23,7 @@ import (
 // Returns:
 //
 //	*webrtc.API: A configured WebRTC API for creating PeerConnections.
-func CreateCustomUDPWebRTCAPI(conn *net.UDPConn) *webrtc.API {
-	fmt.Println("is it going inside again and again?")
+func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 
 	// SettingEngine must be configured with the UDP multiplexer before creating
 	// PeerConnections because ICE transport configuration is immutable after
@@ -54,5 +54,21 @@ func CreateCustomUDPWebRTCAPI(conn *net.UDPConn) *webrtc.API {
 	// PeerConnections. Initialize once per application, not per connection.
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
-	return api
+	return api, udpMux
+}
+
+func RecvAndForwardMediaPackets(webRtcApi *webrtc.API) {
+
+	fmt.Println("reached inside this")
+	_, err := webRtcApi.NewPeerConnection(webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{
+				URLs: []string{"stun:stun.l.google.com:19302"},
+			},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
 }

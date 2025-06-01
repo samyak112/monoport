@@ -13,6 +13,7 @@ func GetPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]byte, er
 
 	copy(msg.Raw, buffer[:numBytes]) // Make a copy, as buf will be reused
 
+	fmt.Println(msg)
 	var err = msg.Decode()
 	if err != nil {
 		fmt.Println("Error decoding STUN message:", err)
@@ -22,7 +23,6 @@ func GetPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]byte, er
 	fmt.Println(msg.Type)
 	if msg.Type == stun.MessageType(stun.BindingRequest) {
 
-		// 5. Construct the STUN Binding Response
 		response, err := stun.Build(
 			stun.BindingSuccess,
 			stun.NewTransactionIDSetter(msg.TransactionID),
@@ -31,7 +31,6 @@ func GetPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]byte, er
 				Port: clientAddr.Port,
 			})
 
-		fmt.Println("this is the response", response)
 		if err != nil {
 			fmt.Println("this is the error", err)
 			return nil, fmt.Errorf("Error building STUN response", err)
