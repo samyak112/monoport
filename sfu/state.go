@@ -21,11 +21,3 @@ type PeerConnectionState struct {
 	peerConnection *webrtc.PeerConnection
 	id             string // Unique ID for this peer
 }
-
-// SignalMessage is a generic struct for messages to/from signaling server
-type SignalMessage struct {
-	PeerID    string `json:"peerId"`
-	Type      string `json:"type"` // "offer", "answer", "candidate"
-	SDP       string `json:"sdp,omitempty"`
-	Candidate string `json:"candidate,omitempty"` // JSON string of webrtc.ICECandidateInit
-}

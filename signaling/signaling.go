@@ -3,13 +3,14 @@ package ws
 import (
 	"encoding/json"
 	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v3"
 	"github.com/samyak112/monoport/sfu"
 	"log"
 	"net/http"
 )
 
 // Handles incoming WebSocket signaling
-func HandleSDP(w http.ResponseWriter, r *http.Request, sfu *sfu_server.SFU) {
+func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.SFU, signalingInstance *Signal) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
@@ -18,26 +19,40 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfu *sfu_server.SFU) {
 	defer conn.Close()
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		_, rawMessage, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Read error:", err)
 			break
 		}
 
-		// Attempts to parse a JSON-encoded byte slice `msg` into a generic map[string]interface{}.
-		// If the JSON is invalid or cannot be unmarshalled
-		//(converting data from a serialized format (like JSON or XML) into a native data structure),
-		//logs an error message with details.
-		// On success, `payload` will contain the decoded JSON object for further processing.
-		var payload map[string]interface{}
-		if err := json.Unmarshal(msg, &payload); err != nil {
-			log.Println("Invalid JSON:", err)
+		var msg SignalMessage
+		if err := json.Unmarshal(rawMessage, &msg); err != nil {
+			log.Printf("Error unmarshalling signaling message: %v. Message: %s", err, rawMessage)
+			return
 		}
 
-		sfu.HandleIncomingSignal(msg)
+		switch msg.Type {
+		case "offer":
+			if msg.PeerID == "" || msg.SDP == "" {
+				log.Println("Invalid offer message: missing peerId or sdp")
+				return
+			}
+			offer := webrtc.SessionDescription{
+				Type: webrtc.SDPTypeOffer,
+				SDP:  msg.SDP,
+			}
+			go sfuInstance.HandleNewPeerOffer(msg.PeerID, offer)
 
-		// sdpChannel <- msg
-		// Handle signaling messages here
+		case "candidate":
+			go sfuInstance.HandleIceCandidate(msg.PeerID, msg.Candidate)
+
+		case "join-room":
+			peer := &SignalingPeer{msg.Type, conn}
+			go signalingInstance.AddPeer(msg.PeerID, peer)
+
+		default:
+			log.Printf("Unhandled signaling message type: %s", msg.Type)
+		}
 	}
 }
 

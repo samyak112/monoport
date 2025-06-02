@@ -8,60 +8,70 @@ import (
 	"log"
 )
 
-func (s *SFU) HandleIncomingSignal(rawMessage []byte) {
-	var msg SignalMessage
-	if err := json.Unmarshal([]byte(rawMessage), &msg); err != nil {
-		log.Printf("Error unmarshalling signaling message: %v. Message: %s", err, rawMessage)
+// NewSFU creates and initializes a new SFU instance
+func NewSFU() *SFU {
+	// Prepare the WebRTC configuration
+	config := webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{
+				URLs: []string{"stun:stun.l.google.com:19302"},
+			},
+			// You can add TURN servers here if needed:
+			// {
+			// URLs: []string{"turn:your.turn.server:3478"},
+			// Username: "user",
+			// Credential: "password",
+			// },
+		},
+	}
+
+	// Create a new WebRTC API object.
+	// This allows configuring media engines, settings engines, etc.
+	m := &webrtc.MediaEngine{}
+	if err := m.RegisterDefaultCodecs(); err != nil {
+		log.Fatalf("Failed to register default codecs: %v", err)
+	}
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+
+	return &SFU{
+		peers:         make(map[string]*PeerConnectionState),
+		trackLocals:   make(map[string]webrtc.TrackLocal),
+		config:        config,
+		api:           api,
+		signalChannel: make(chan SignalMessage, 20), // Buffered channel for outgoing signals
+	}
+}
+
+func (s *SFU) HandleIceCandidate(peerId string, candidate string) {
+
+	if peerId == "" || candidate == "" {
+		log.Println("Invalid candidate message: missing peerId or candidate")
+		return
+	}
+	s.lock.RLock() // Read lock to access s.peers
+	pcs, ok := s.peers[peerId]
+	s.lock.RUnlock()
+
+	if !ok {
+		log.Printf("Received candidate for unknown or not-yet-processed peer %s", peerId)
 		return
 	}
 
-	log.Printf("Received signal: PeerID=%s, Type=%s", msg.PeerID, msg.Type)
-	switch msg.Type {
-	case "offer":
-		if msg.PeerID == "" || msg.SDP == "" {
-			log.Println("Invalid offer message: missing peerId or sdp")
-			return
-		}
-		offer := webrtc.SessionDescription{
-			Type: webrtc.SDPTypeOffer,
-			SDP:  msg.SDP,
-		}
-		// Offload to a goroutine to prevent blocking the signaling handler
-		go s.handleNewPeerOffer(msg.PeerID, offer)
+	var iceCandidateInit webrtc.ICECandidateInit
+	if err := json.Unmarshal([]byte(candidate), &iceCandidateInit); err != nil {
+		log.Printf("[%s] Error unmarshalling ICE candidate from signal: %v. Data: %s", peerId, err, candidate)
+		return
+	}
 
-	case "candidate":
-		if msg.PeerID == "" || msg.Candidate == "" {
-			log.Println("Invalid candidate message: missing peerId or candidate")
-			return
-		}
-		s.lock.RLock() // Read lock to access s.peers
-		pcs, ok := s.peers[msg.PeerID]
-		s.lock.RUnlock()
-
-		if !ok {
-			log.Printf("Received candidate for unknown or not-yet-processed peer %s", msg.PeerID)
-			return
-		}
-
-		var iceCandidateInit webrtc.ICECandidateInit
-		if err := json.Unmarshal([]byte(msg.Candidate), &iceCandidateInit); err != nil {
-			log.Printf("[%s] Error unmarshalling ICE candidate from signal: %v. Data: %s", msg.PeerID, err, msg.Candidate)
-			return
-		}
-
-		if err := pcs.peerConnection.AddICECandidate(iceCandidateInit); err != nil {
-			log.Printf("[%s] Error adding ICE candidate: %v", msg.PeerID, err)
-		} else {
-			log.Printf("[%s] Added ICE candidate from signal: %s", msg.PeerID, iceCandidateInit.Candidate)
-		}
-
-	default:
-		log.Printf("Unhandled signaling message type: %s", msg.Type)
+	if err := pcs.peerConnection.AddICECandidate(iceCandidateInit); err != nil {
+		log.Printf("[%s] Error adding ICE candidate: %v", peerId, err)
+	} else {
+		log.Printf("[%s] Added ICE candidate from signal: %s", peerId, iceCandidateInit.Candidate)
 	}
 }
 
 // handleNewPeerOffer is called when a new peer sends an SDP offer.
-func (s *SFU) handleNewPeerOffer(peerID string, offer webrtc.SessionDescription) {
+func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription) {
 	s.lock.Lock() // Full lock for initial peer setup phase
 
 	if _, ok := s.peers[peerID]; ok {
