@@ -2,14 +2,14 @@ package ws
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/websocket"
+	"github.com/samyak112/monoport/sfu"
 	"log"
 	"net/http"
 )
 
 // Handles incoming WebSocket signaling
-func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
+func HandleSDP(w http.ResponseWriter, r *http.Request, sfu *sfu_server.SFU) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
@@ -23,7 +23,6 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Read error:", err)
 			break
 		}
-		fmt.Printf("WebSocket message: %s\n", msg)
 
 		// Attempts to parse a JSON-encoded byte slice `msg` into a generic map[string]interface{}.
 		// If the JSON is invalid or cannot be unmarshalled
@@ -34,6 +33,8 @@ func WebsocketHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(msg, &payload); err != nil {
 			log.Println("Invalid JSON:", err)
 		}
+
+		sfu.HandleIncomingSignal(msg)
 
 		// sdpChannel <- msg
 		// Handle signaling messages here

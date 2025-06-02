@@ -2,22 +2,19 @@ package main
 
 import (
 	// "fmt"
+	"github.com/gorilla/websocket"
+	"github.com/samyak112/monoport/sfu"
+	"github.com/samyak112/monoport/signaling"
+	"github.com/samyak112/monoport/stun_server"
+	"github.com/samyak112/monoport/transport"
 	"log"
 	"net"
 	"net/http"
-	// "main/sfu"
-	"github.com/samyak112/monoport/sfu"
-	ws "github.com/samyak112/monoport/signaling"
-	"github.com/samyak112/monoport/transport"
-	// "main/stun"
-	multiplexer "github.com/samyak112/monoport/udp"
 )
 
 func main() {
-
-	// for now am keeping a map in memory but this cant be used if we have multiple instances of our server
-	// in that case we will have to use redis or kafka or some other service to manage the rooms and users at a shared space
-	// var rooms = map[string][]string{} // roomID -> list of connection IDs
+	// Global SFU instance
+	var sfu *sfu_server.SFU
 	packetChannel := make(chan transport.PacketInfo, 1024)
 
 	// returns a *net.UDPAddr struct representing the UDP network address, using the network type and address
@@ -30,11 +27,19 @@ func main() {
 	_, iceUDPMux := sfu_server.CreateCustomUDPWebRTCAPI(myConn)
 
 	// using a go routine so that the TCP connection is not blocked because of the UDP stream
-	go multiplexer.StartUdpMultiplexer(udpConn, packetChannel, iceUDPMux)
+	go stun_server.HandleStunPackets(udpConn, packetChannel, iceUDPMux)
 
 	//Start WebSocket signaling
-	http.HandleFunc("/", ws.WebsocketHandler)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		ws.HandleSDP(w, r, sfu)
+	})
 	log.Println("Listening on :8000")
 	http.ListenAndServe("127.0.0.1:8000", nil)
 
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
 }

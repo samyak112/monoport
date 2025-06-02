@@ -7,7 +7,7 @@ import (
 	"net"
 )
 
-// SfuServer configures and returns a WebRTC API instance that utilizes a
+// CreateCustomUDPWebRTCAPI configures and returns a WebRTC API instance that utilizes a
 // pre-existing UDP connection instead of opening new ports.
 //
 // This is achieved by using a webrtc.SettingEngine to configure a
@@ -18,7 +18,7 @@ import (
 //
 // Args:
 //
-//	conn (*net.UDPConn): The existing UDP connection to be used by WebRTC.
+//	conn (net.PacketConn): The existing UDP connection to be used by WebRTC.
 //
 // Returns:
 //
