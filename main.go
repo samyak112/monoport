@@ -1,7 +1,6 @@
 package main
 
 import (
-	// "fmt"
 	"github.com/gorilla/websocket"
 	"github.com/samyak112/monoport/sfu"
 	"github.com/samyak112/monoport/signaling"
@@ -17,12 +16,8 @@ func main() {
 	If they weren’t pointers, we’d end up with copies, and each one would have its own mutex,
 	which means locking wouldn’t work properly — they’d all be locking different instances. */
 
-	sfu := sfu_server.NewSFU()
-	signaling := &ws.Signal{
-		PeerMap: make(map[string]*ws.SignalingPeer),
-	}
-
 	packetChannel := make(chan transport.PacketInfo, 1024)
+	signalingChannel := make(chan *transport.SignalMessage, 5)
 
 	// returns a *net.UDPAddr struct representing the UDP network address, using the network type and address
 	udpAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:5000")
@@ -31,7 +26,20 @@ func main() {
 	udpConn, _ := net.ListenUDP("udp", udpAddr)
 
 	myConn := &transport.CustomPacketConn{UDPConn: udpConn, DataForwardChan: packetChannel}
-	_, iceUDPMux := sfu_server.CreateCustomUDPWebRTCAPI(myConn)
+	webRtcApi, iceUDPMux := sfu_server.CreateCustomUDPWebRTCAPI(myConn)
+
+	//passing same signalingChannel in both sfu and signaling struct creation
+	// so that i can send something to the channel from one struct and it can be
+	// received in another , this way i can transfer information from sfu to signaling
+	// by keeping their logic different
+
+	sfu := sfu_server.NewSFU(webRtcApi, signalingChannel)
+
+	signaling := &ws.Signal{
+		PeerMap:           make(map[string]*websocket.Conn),
+		SignalChannelRecv: signalingChannel,
+	}
+	go signaling.ProcessOutgoingSignals()
 
 	// using a go routine so that the TCP connection is not blocked because of the UDP stream
 	go stun_server.HandleStunPackets(udpConn, packetChannel, iceUDPMux)

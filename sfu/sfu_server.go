@@ -47,9 +47,9 @@ func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 	reducing NAT mappings and system resource usage.
 
 	2. Another reason and more important reason is I need a way to pass in my own UDP conn which i created
-	in main.go so that i can bypass symmetric NATs
+	in main.go so that i can bypass symmetric NATs*/
 	var udpMux = webrtc.NewICEUDPMux(nil, conn)
-	settingEngine.SetICEUDPMux(udpMux)*/
+	settingEngine.SetICEUDPMux(udpMux)
 
 	/*NewAPI creates a configured WebRTC API factory from SettingEngine options.
 	Returns an API instance that applies custom settings to all created

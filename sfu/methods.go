@@ -4,17 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pion/webrtc/v3"
+	"github.com/samyak112/monoport/transport"
 	"io"
 	"log"
 )
 
 // NewSFU creates and initializes a new SFU instance
-func NewSFU() *SFU {
-	// Prepare the WebRTC configuration
+func NewSFU(api *webrtc.API, signalChannel chan *transport.SignalMessage) *SFU {
+
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
+				URLs: []string{"stun:stun.l.google.com:19302"}, // Example STUN server
 			},
 			// You can add TURN servers here if needed:
 			// {
@@ -24,30 +25,19 @@ func NewSFU() *SFU {
 			// },
 		},
 	}
-
-	// Create a new WebRTC API object.
-	// This allows configuring media engines, settings engines, etc.
-	m := &webrtc.MediaEngine{}
-	if err := m.RegisterDefaultCodecs(); err != nil {
-		log.Fatalf("Failed to register default codecs: %v", err)
-	}
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
-
+	//No need to initialize Mutex here because a struct initializes its elements with a zero values if not given
+	// and zero value of a Mutex is an unlocked mutex
 	return &SFU{
-		peers:         make(map[string]*PeerConnectionState),
-		trackLocals:   make(map[string]webrtc.TrackLocal),
-		config:        config,
-		api:           api,
-		signalChannel: make(chan SignalMessage, 20), // Buffered channel for outgoing signals
+		peers:             make(map[string]*PeerConnectionState),
+		trackLocals:       make(map[string]webrtc.TrackLocal),
+		config:            config,
+		api:               api,
+		signalChannelSend: signalChannel, // Buffered channel for outgoing signals
 	}
 }
 
 func (s *SFU) HandleIceCandidate(peerId string, candidate string) {
 
-	if peerId == "" || candidate == "" {
-		log.Println("Invalid candidate message: missing peerId or candidate")
-		return
-	}
 	s.lock.RLock() // Read lock to access s.peers
 	pcs, ok := s.peers[peerId]
 	s.lock.RUnlock()
@@ -115,7 +105,7 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 			return
 		}
 		// TODO: Send this candidate to your signaling server for peerID
-		s.signalChannel <- SignalMessage{
+		s.signalChannelSend <- &transport.SignalMessage{
 			PeerID:    peerID,
 			Type:      "candidate",
 			Candidate: string(candidateJSON),
@@ -250,7 +240,7 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 
 	log.Printf("[%s] SDP Answer created and local description set. Sending to signaling server...", peerID)
 	// TODO: Send this answer (answer.SDP) to your signaling server for peerID
-	s.signalChannel <- SignalMessage{
+	s.signalChannelSend <- &transport.SignalMessage{
 		PeerID: peerID,
 		Type:   "answer",
 		SDP:    answer.SDP,

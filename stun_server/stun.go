@@ -1,7 +1,6 @@
 package stun_server
 
 import (
-	"encoding/binary"
 	"fmt"
 	"github.com/pion/ice/v2"
 	"github.com/pion/stun"
@@ -9,13 +8,6 @@ import (
 	"log"
 	"net"
 )
-
-// Detect WebRTC traffic (STUN, SFU)
-func isSTUNPacket(data []byte) bool {
-	return len(data) >= 20 &&
-		(data[0] == 0x00 || data[0] == 0x01) &&
-		binary.BigEndian.Uint32(data[4:8]) == 0x2112A442
-}
 
 func HandleStunPackets(conn *net.UDPConn, packetChannel chan transport.PacketInfo, iceUDPMux ice.UDPMux) {
 	fmt.Println("listenint at 5000 for UDP")
@@ -35,12 +27,7 @@ func HandleStunPackets(conn *net.UDPConn, packetChannel chan transport.PacketInf
 			continue
 		}
 
-		if isSTUNPacket(dataPacket) {
-			udpResponse, err = processStunPacket(pktInfo.N, pktInfo.Addr, dataPacket)
-		} else {
-			// not a stun packet so we dont need to handle it
-		}
-
+		udpResponse, err = processStunPacket(pktInfo.N, pktInfo.Addr, dataPacket)
 		_, err = conn.WriteToUDP(udpResponse, remoteAddr)
 		if err != nil {
 			fmt.Println("Error occured in writing UDP response", err)

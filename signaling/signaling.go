@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
 	"github.com/samyak112/monoport/sfu"
+	"github.com/samyak112/monoport/transport"
 	"log"
 	"net/http"
 )
@@ -25,7 +26,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			break
 		}
 
-		var msg SignalMessage
+		var msg transport.SignalMessage
 		if err := json.Unmarshal(rawMessage, &msg); err != nil {
 			log.Printf("Error unmarshalling signaling message: %v. Message: %s", err, rawMessage)
 			return
@@ -43,12 +44,15 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			}
 			go sfuInstance.HandleNewPeerOffer(msg.PeerID, offer)
 
-		case "candidate":
+		case "ice-candidate":
+			if msg.PeerID == "" || msg.Candidate == "" {
+				log.Println("Invalid candidate message: missing peerId or candidate")
+				return
+			}
 			go sfuInstance.HandleIceCandidate(msg.PeerID, msg.Candidate)
 
 		case "join-room":
-			peer := &SignalingPeer{msg.Type, conn}
-			go signalingInstance.AddPeer(msg.PeerID, peer)
+			go signalingInstance.AddPeer(msg.PeerID, conn)
 
 		default:
 			log.Printf("Unhandled signaling message type: %s", msg.Type)
