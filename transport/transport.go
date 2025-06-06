@@ -4,8 +4,9 @@
 package transport
 
 import (
-	"encoding/binary"
+	// "encoding/binary"
 	"fmt"
+	"github.com/pion/stun"
 	"net"
 )
 
@@ -22,18 +23,13 @@ type CustomPacketConn struct {
 
 // Detect WebRTC traffic (STUN, SFU)
 func (c *CustomPacketConn) isSTUNPacket(data []byte) bool {
-	return len(data) >= 20 &&
-		(data[0] == 0x00 || data[0] == 0x01) &&
-		binary.BigEndian.Uint32(data[4:8]) == 0x2112A442
+	return stun.IsMessage(data)
 }
 
 func (c *CustomPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 
 	var udpAddr *net.UDPAddr
 	n, udpAddr, err = c.UDPConn.ReadFromUDP(p)
-
-	/* Not checking if a packet is for STUN or for RTP because RTP packets should not be lagged
-	   even by ms just because of checking of STUN packet i can transfer this packet and check*/
 
 	// If data was read (or even if there was an error, send info)
 	if c.DataForwardChan != nil {

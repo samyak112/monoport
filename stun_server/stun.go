@@ -1,6 +1,7 @@
 package stun_server
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/pion/ice/v2"
 	"github.com/pion/stun"
@@ -43,15 +44,16 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 
 	copy(msg.Raw, buffer[:numBytes]) // Make a copy, as buf will be reused
 
-	fmt.Println(msg)
+	// fmt.Println(msg)
 	var err = msg.Decode()
 	if err != nil {
 		fmt.Println("Error decoding STUN message:", err)
 		return nil, fmt.Errorf("Error occured in decoding the message", err)
 	}
 
-	fmt.Println(msg.Type)
 	if msg.Type == stun.MessageType(stun.BindingRequest) {
+
+		fmt.Println(msg.Contains(stun.AttrUsername), "asdsad")
 
 		response, err := stun.Build(
 			stun.BindingSuccess,
@@ -62,12 +64,18 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 			})
 
 		if err != nil {
-			fmt.Println("this is the error", err)
-			return nil, fmt.Errorf("Error building STUN response", err)
+			return nil, fmt.Errorf("error building STUN response: %w", err)
 		}
 
-		fmt.Println("sending the packet")
-		return response.Raw, nil
+		log.Println(msg, "this is the packet")
+
+		var buf bytes.Buffer
+		if _, err := response.WriteTo(&buf); err != nil {
+			return nil, fmt.Errorf("error serializing STUN response: %w", err)
+		}
+
+		fmt.Println("Sending STUN BindingSuccess to", clientAddr)
+		return buf.Bytes(), nil
 
 	} else {
 		fmt.Println("Recieved non Binding", msg.Type)

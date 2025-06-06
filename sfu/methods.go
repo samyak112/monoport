@@ -53,6 +53,7 @@ func (s *SFU) HandleIceCandidate(peerId string, candidate string) {
 		return
 	}
 
+	log.Println("adding the new ice candidate from client")
 	if err := pcs.peerConnection.AddICECandidate(iceCandidateInit); err != nil {
 		log.Printf("[%s] Error adding ICE candidate: %v", peerId, err)
 	} else {
@@ -63,14 +64,16 @@ func (s *SFU) HandleIceCandidate(peerId string, candidate string) {
 // handleNewPeerOffer is called when a new peer sends an SDP offer.
 func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription) {
 	s.lock.Lock() // Full lock for initial peer setup phase
-
-	if _, ok := s.peers[peerID]; ok {
-		s.lock.Unlock()
-		log.Printf("Peer %s already connected or processing. Ignoring new offer.", peerID)
-		return
+	_, ok := s.peers[peerID]
+	if ok {
+		delete(s.peers, peerID)
+		log.Printf("Peer %s already connected or processing. so replaced it", peerID)
+		// return
 	}
 
-	log.Printf("Handling offer for new peer: %s", peerID)
+	s.lock.Unlock()
+	s.lock.Lock()
+	// log.Printf("Handling offer for new peer: %s", peerID)
 
 	// Create a new PeerConnection for this peer
 	peerConnection, err := s.api.NewPeerConnection(s.config)
@@ -89,31 +92,12 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 
 	// --- Configure PeerConnection Callbacks ---
 
-	// Set up ICE candidate handling: send candidates to the remote peer
-	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			log.Printf("[%s] ICE Candidate gathering complete.", peerID)
-			// Typically, the complete SDP (with all candidates) is sent after gathering is done,
-			// or candidates are trickled. Here, we trickle.
-			return
-		}
-		log.Printf("[%s] Local ICE Candidate: %s", peerID, candidate.ToJSON().Candidate)
-
-		candidateJSON, err := json.Marshal(candidate.ToJSON())
-		if err != nil {
-			log.Printf("[%s] Error marshalling local ICE candidate: %v", peerID, err)
-			return
-		}
-		// TODO: Send this candidate to your signaling server for peerID
-		s.signalChannelSend <- &transport.SignalMessage{
-			PeerID:    peerID,
-			Type:      "candidate",
-			Candidate: string(candidateJSON),
-		}
+	peerConnection.OnNegotiationNeeded(func() {
+		fmt.Println("negotiation needed")
 	})
-
 	// Set up handling for incoming tracks from this new peer
 	peerConnection.OnTrack(func(incomingTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		log.Println("came here for received track")
 		trackDetails := fmt.Sprintf("ID=%s, Kind=%s, StreamID=%s, SSRC=%d, Codec=%s",
 			incomingTrack.ID(), incomingTrack.Kind(), incomingTrack.StreamID(), incomingTrack.SSRC(), incomingTrack.Codec().MimeType)
 		log.Printf("[%s] Track received: %s", peerID, trackDetails)
@@ -148,6 +132,8 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 
 		// Forward this new localTrack to all *other* currently connected peers
 		s.lock.RLock() // Read lock for iterating s.peers
+
+		log.Println("reached here?")
 		for otherPeerID, otherPCS := range s.peers {
 			if otherPeerID == peerID { // Don't send track back to the originator
 				continue
@@ -189,9 +175,34 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 		}()
 	})
 
+	// Set up ICE candidate handling: send candidates to the remote peer
+	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			log.Printf("[%s] ICE Candidate gathering complete.", peerID)
+			// Typically, the complete SDP (with all candidates) is sent after gathering is done,
+			// or candidates are trickled. Here, we trickle.
+			return
+		}
+		// log.Printf("[%s] Local ICE Candidate: %s", peerID, candidate.ToJSON().Candidate)
+
+		candidateJSON, err := json.Marshal(candidate.ToJSON())
+		if err != nil {
+			log.Printf("[%s] Error marshalling local ICE candidate: %v", peerID, err)
+			return
+		}
+
+		log.Println("sending ice candidate to client")
+		// TODO: Send this candidate to your signaling server for peerID
+		s.signalChannelSend <- &transport.SignalMessage{
+			PeerID:    peerID,
+			Type:      "candidate",
+			Candidate: string(candidateJSON),
+		}
+	})
+
 	// Handle PeerConnection state changes (e.g., disconnections)
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		log.Printf("[%s] Peer Connection State has changed: %s", peerID, state.String())
+		log.Printf(" Peer Connection State has changed:", peerID, state.String())
 		if state == webrtc.PeerConnectionStateFailed ||
 			state == webrtc.PeerConnectionStateClosed ||
 			state == webrtc.PeerConnectionStateDisconnected {
@@ -199,10 +210,21 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 		}
 	})
 
+	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+
+		log.Printf(" Ice Connection State has changed:", peerID, state.String())
+	})
+
+	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+
+		log.Printf(" Ice gather State has changed:", peerID, state.String())
+	})
+
 	// --- Add existing tracks from other peers to this new peer's connection ---
 	// This must be done *before* CreateAnswer for these tracks to be included in the initial SDP answer.
 	s.lock.RLock() // Read lock for iterating s.trackLocals
 	log.Printf("[%s] Adding existing tracks from other peers to this new connection:", peerID)
+	log.Println("local tracks found to send to other peers", s.trackLocals)
 	for existingGlobalTrackID, localTrackToForward := range s.trackLocals {
 		// Ensure the track doesn't originate from the current peer (it shouldn't be in trackLocals if it did, due to above logic)
 		// A more robust check might involve parsing peerID from existingGlobalTrackID.
@@ -215,12 +237,16 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 	s.lock.RUnlock()
 
 	// --- SDP Exchange ---
+	log.Println("creating remote SDP")
 	// Set the remote SessionDescription (the offer from the new peer)
 	if err := peerConnection.SetRemoteDescription(offer); err != nil {
 		log.Printf("[%s] Failed to set remote description: %v", peerID, err)
 		s.cleanupPeer(peerID) // Clean up if setup fails
 		return
 	}
+
+	test := peerConnection.SCTP().Transport().ICETransport().Role().String()
+	fmt.Println(test, "this si it")
 
 	// Create an SDP answer
 	answer, err := peerConnection.CreateAnswer(nil)
@@ -230,6 +256,7 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 		return
 	}
 
+	log.Println("creating local sdp")
 	// Set the local SessionDescription (the SFU's answer)
 	// This also starts the ICE gathering process if not already started.
 	if err := peerConnection.SetLocalDescription(answer); err != nil {
@@ -286,7 +313,7 @@ func (s *SFU) cleanupPeer(peerID string) {
 
 	pcs, ok := s.peers[peerID]
 	if !ok {
-		log.Printf("Peer %s not found for cleanup or already cleaned up.", peerID)
+		log.Printf("Peer %s not found for cleanup or already cleaned up. Here is the peer list", s.peers)
 		return
 	}
 

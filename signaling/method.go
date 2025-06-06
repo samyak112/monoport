@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"encoding/json"
 	"github.com/gorilla/websocket"
 	"log"
 )
@@ -14,15 +15,8 @@ func (s *Signal) AddPeer(peerID string, conn *websocket.Conn) {
 	}
 
 	s.PeerMap[peerID] = conn
-	log.Println(s.PeerMap)
-	log.Println("peer added", peerID)
-	peer, ok := s.PeerMap[peerID]
+	log.Println(peerID)
 
-	if ok {
-		log.Printf("Peer: %+v\n", *peer) // <- dereferencing here to print the actual struct
-	} else {
-		log.Println("Peer not found")
-	}
 }
 
 func (s *Signal) RemovePeer(peerID string) {
@@ -36,20 +30,44 @@ func (s *Signal) RemovePeer(peerID string) {
 
 // processOutgoingSignals simulates sending messages from the SFU to clients via a signaling server.
 func (s *Signal) ProcessOutgoingSignals() {
-	log.Println("atleast got in")
 	for msg := range s.SignalChannelRecv {
-		// TODO: Implement actual sending logic to your signaling server.
-		// This would involve formatting the message (e.g., JSON) and sending it
-		// over WebSocket, HTTP, or another transport to the specific peer (msg.PeerID).
-		log.Printf(">>> OUTGOING SIGNAL for Peer %s (Type: %s) >>>", msg.PeerID, msg.Type)
-		log.Println(s.PeerMap)
 		if msg.SDP != "" {
-			log.Printf("SDP for %s:\n%s", msg.PeerID, msg.SDP)
+			// log.Printf("SDP for %s:\n%s", msg.PeerID, msg.SDP)
+
+			payload := map[string]interface{}{
+				"type": msg.Type,
+				"sdp":  msg.SDP,
+			}
+
+			data, err := json.Marshal(payload)
+			if err != nil {
+				log.Println("JSON marshal error:", err)
+				break
+			}
+
+			if err := s.PeerMap[msg.PeerID].WriteMessage(1, data); err != nil {
+				log.Println("Write error in sending SDP:", err)
+				break
+			}
 		}
 		if msg.Candidate != "" {
 			// The candidate string is already a JSON of ICECandidateInit
-			log.Printf("ICE Candidate for %s: %s", msg.PeerID, msg.Candidate)
+			// log.Printf("ICE Candidate for %s: %s", msg.PeerID, msg.Candidate)
+			payload := map[string]interface{}{
+				"type":      msg.Type,
+				"candidate": msg.Candidate,
+			}
+
+			data, err := json.Marshal(payload)
+			if err != nil {
+				log.Println("JSON marshal error:", err)
+				break
+			}
+			if err := s.PeerMap[msg.PeerID].WriteMessage(1, data); err != nil {
+				log.Println("Write error in Candidate:", err)
+				break
+			}
 		}
-		log.Println(">>> END OUTGOING SIGNAL >>>")
+		// log.Println(">>> END OUTGOING SIGNAL >>>")
 	}
 }

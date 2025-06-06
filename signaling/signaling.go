@@ -31,7 +31,6 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			log.Printf("Error unmarshalling signaling message: %v. Message: %s", err, rawMessage)
 			return
 		}
-
 		switch msg.Type {
 		case "offer":
 			if msg.PeerID == "" || msg.SDP == "" {

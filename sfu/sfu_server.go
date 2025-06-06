@@ -51,6 +51,16 @@ func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 	var udpMux = webrtc.NewICEUDPMux(nil, conn)
 	settingEngine.SetICEUDPMux(udpMux)
 
+	m := &webrtc.MediaEngine{}
+
+	// 2. Register the default codecs that browsers support.
+	// THIS IS THE CRUCIAL STEP. Without it, the SFU doesn't know how
+	// to handle video (VP8, H264) or audio (Opus) from a browser.
+	if err := m.RegisterDefaultCodecs(); err != nil {
+		// This is a fatal startup error, so panic is appropriate.
+		fmt.Println("Failed to register default codecs: %v", err)
+	}
+
 	/*NewAPI creates a configured WebRTC API factory from SettingEngine options.
 	Returns an API instance that applies custom settings to all created
 	PeerConnections. Initialize once per application, not per connection.*/
