@@ -6,19 +6,30 @@ import (
 	"sync"
 )
 
-// SFU holds the global state for the Selective Forwarding Unit
+// Signal types for the queue
+type offerSignal struct{ sdp webrtc.SessionDescription }
+type candidateSignal struct{ candidate webrtc.ICECandidateInit }
+type AnswerSignal struct{ SDP webrtc.SessionDescription }
+
+// SFU (Selective Forwarding Unit) holds the global state for all peer connections.
 type SFU struct {
-	peers       map[string]*PeerConnectionState // Map of peerID to their connection state
-	trackLocals map[string]webrtc.TrackLocal    // Map of globalTrackID to TrackLocalStaticRTP
-	// globalTrackID is typically peerID + track.Kind() + track.ID() to ensure uniqueness
-	lock              sync.RWMutex
+	peersLock         sync.RWMutex
+	peers             map[string]*PeerConnectionState
+	trackLock         sync.RWMutex
+	trackLocals       map[string]*webrtc.TrackLocalStaticRTP // Store the concrete type
 	config            webrtc.Configuration
 	api               *webrtc.API
-	signalChannelSend chan *transport.SignalMessage // A channel to simulate sending messages to signaling server
+	signalChannelSend chan *transport.SignalMessage
 }
 
-// PeerConnectionState holds the state for a single peer connection
+// PeerConnectionState holds the state for a single peer, including its connection and signaling queue.
 type PeerConnectionState struct {
+	id             string
 	peerConnection *webrtc.PeerConnection
-	id             string // Unique ID for this peer
+	sfu            *SFU // Reference back to the SFU
+
+	// stateLock protects the fields below, ensuring atomic state updates for this peer.
+	stateLock             sync.Mutex
+	negotiationInProgress bool
+	signalQueue           []interface{} // Queue for offers and ICE candidates
 }

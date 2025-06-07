@@ -50,6 +50,14 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			}
 			go sfuInstance.HandleIceCandidate(msg.PeerID, msg.Candidate)
 
+		case "answer":
+
+			offer := webrtc.SessionDescription{
+				Type: webrtc.SDPTypeAnswer,
+				SDP:  msg.SDP,
+			}
+			go sfuInstance.DispatchSignal(msg.PeerID, sfu_server.AnswerSignal{SDP: offer})
+
 		case "join-room":
 			go signalingInstance.AddPeer(msg.PeerID, conn)
 

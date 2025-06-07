@@ -3,203 +3,352 @@ package sfu_server
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/pion/webrtc/v3"
-	"github.com/samyak112/monoport/transport"
 	"io"
 	"log"
+
+	"github.com/pion/webrtc/v3"
+	"github.com/samyak112/monoport/transport" // Assuming this is your transport package
 )
 
-// NewSFU creates and initializes a new SFU instance
+// NewSFU creates and initializes a new SFU instance.
 func NewSFU(api *webrtc.API, signalChannel chan *transport.SignalMessage) *SFU {
-
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{"stun:stun.l.google.com:19302"}, // Example STUN server
+				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
-			// You can add TURN servers here if needed:
-			// {
-			// URLs: []string{"turn:your.turn.server:3478"},
-			// Username: "user",
-			// Credential: "password",
-			// },
 		},
 	}
-	//No need to initialize Mutex here because a struct initializes its elements with a zero values if not given
-	// and zero value of a Mutex is an unlocked mutex
 	return &SFU{
 		peers:             make(map[string]*PeerConnectionState),
-		trackLocals:       make(map[string]webrtc.TrackLocal),
+		trackLocals:       make(map[string]*webrtc.TrackLocalStaticRTP),
 		config:            config,
 		api:               api,
-		signalChannelSend: signalChannel, // Buffered channel for outgoing signals
+		signalChannelSend: signalChannel,
 	}
 }
 
-func (s *SFU) HandleIceCandidate(peerId string, candidate string) {
+// dispatchSignal adds a signal to the peer's queue and starts the processing loop if not already running.
+func (s *SFU) DispatchSignal(peerID string, signal interface{}) {
+	s.peersLock.RLock()
+	pcs, ok := s.peers[peerID]
+	s.peersLock.RUnlock()
 
-	s.lock.RLock() // Read lock to access s.peers
-	pcs, ok := s.peers[peerId]
-	s.lock.RUnlock()
-
+	// CORRECTED: Use a proper type assertion.
+	// We should only proceed for an unknown peer if the signal is an offer.
 	if !ok {
-		log.Printf("Received candidate for unknown or not-yet-processed peer %s", peerId)
+		if _, isOffer := signal.(offerSignal); !isOffer {
+			log.Printf("Received signal for unknown peer %s, ignoring", peerID)
+			return
+		}
+		// The HandleNewPeerOffer function will create the peer.
+		// We can't proceed here as `pcs` is nil.
 		return
 	}
 
-	var iceCandidateInit webrtc.ICECandidateInit
-	if err := json.Unmarshal([]byte(candidate), &iceCandidateInit); err != nil {
-		log.Printf("[%s] Error unmarshalling ICE candidate from signal: %v. Data: %s", peerId, err, candidate)
-		return
+	pcs.stateLock.Lock()
+	pcs.signalQueue = append(pcs.signalQueue, signal)
+	// If a processing goroutine is not already running for this peer, start one.
+	if !pcs.negotiationInProgress {
+		pcs.negotiationInProgress = true
+		go pcs.processSignalQueue()
 	}
-
-	log.Println("adding the new ice candidate from client")
-	if err := pcs.peerConnection.AddICECandidate(iceCandidateInit); err != nil {
-		log.Printf("[%s] Error adding ICE candidate: %v", peerId, err)
-	} else {
-		log.Printf("[%s] Added ICE candidate from signal: %s", peerId, iceCandidateInit.Candidate)
-	}
+	pcs.stateLock.Unlock()
 }
 
-// handleNewPeerOffer is called when a new peer sends an SDP offer.
+// HandleNewPeerOffer is called when a new peer sends an SDP offer.
 func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription) {
-	s.lock.Lock() // Full lock for initial peer setup phase
-	_, ok := s.peers[peerID]
-	if ok {
-		//have to do this because offer becomes stale if the same peer is sending another offer
-		// there are many reasons why a new offere can be receieved like
-		//
-		delete(s.peers, peerID)
-		log.Printf("Peer %s already connected or processing. so replaced it", peerID)
-		// return
+	s.peersLock.Lock()
+	pcs, ok := s.peers[peerID]
+	if !ok {
+		// This is a new peer, create the connection state.
+		log.Printf("Handling offer for new peer: %s", peerID)
+		peerConnection, err := s.api.NewPeerConnection(s.config)
+		if err != nil {
+			log.Printf("Failed to create PeerConnection for %s: %v", peerID, err)
+			s.peersLock.Unlock()
+			return
+		}
+
+		pcs = &PeerConnectionState{
+			id:             peerID,
+			peerConnection: peerConnection,
+			sfu:            s,
+			signalQueue:    make([]interface{}, 0),
+		}
+		s.peers[peerID] = pcs
+		s.configurePeerConnection(pcs)
+	} else {
+		fmt.Println("duplicate came")
 	}
+	s.peersLock.Unlock()
 
-	s.lock.Unlock()
-	s.lock.Lock()
-	// log.Printf("Handling offer for new peer: %s", peerID)
-
-	// Create a new PeerConnection for this peer
-	peerConnection, err := s.api.NewPeerConnection(s.config)
-	if err != nil {
-		s.lock.Unlock()
-		log.Printf("Failed to create PeerConnection for %s: %v", peerID, err)
-		return
-	}
-
-	pcs := &PeerConnectionState{
-		peerConnection: peerConnection,
-		id:             peerID,
-	}
-	s.peers[peerID] = pcs
-	s.lock.Unlock() // Unlock after adding to peers map, specific handlers will use their own locks
-
-	// --- Configure PeerConnection Callbacks ---
-
-	peerConnection.OnNegotiationNeeded(func() { fmt.Println("negotiation needed") })
-
-	peerConnection.OnTrack(s.handleIncomingTrack(peerID, pcs))
-
-	peerConnection.OnICECandidate(s.handleICECandidate(peerID))
-
-	peerConnection.OnConnectionStateChange(s.handleConnectionStateChange(peerID))
-
-	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf(" Ice Connection State has changed:", peerID, state.String())
-	})
-
-	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
-		log.Printf(" Ice gather State has changed:", peerID, state.String())
-	})
-
-	s.addExistingTracksToPeer(peerID, peerConnection)
-	// --- SDP Exchange ---
-
-	if err := s.setRemoteAndCreateAnswer(peerID, peerConnection, offer); err != nil {
-		// Error is already logged and peer cleaned up inside the function
-		return
-	}
+	// Dispatch the offer to the peer's signal queue for processing.
+	s.DispatchSignal(peerID, offerSignal{sdp: offer})
 }
 
-func (s *SFU) addExistingTracksToPeer(peerID string, peerConnection *webrtc.PeerConnection) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+// HandleIceCandidate is called when a new ICE candidate is received from a peer.
+func (s *SFU) HandleIceCandidate(peerID string, candidateStr string) {
+	var candidate webrtc.ICECandidateInit
+	if err := json.Unmarshal([]byte(candidateStr), &candidate); err != nil {
+		log.Printf("[%s] Error unmarshalling ICE candidate: %v", peerID, err)
+		return
+	}
 
-	log.Printf("[%s] Adding existing tracks from other peers to this new connection:", peerID)
-	log.Println("local tracks found to send to other peers", s.trackLocals)
+	// Dispatch the candidate to the peer's signal queue.
+	s.DispatchSignal(peerID, candidateSignal{candidate: candidate})
+}
 
-	for existingGlobalTrackID, localTrackToForward := range s.trackLocals {
-		// Optionally, parse peerID from existingGlobalTrackID to ensure you don’t add tracks originating from this peer
-		log.Printf("[%s] Adding existing track %s (ID: %s, StreamID: %s, Kind: %s) to new peer connection",
-			peerID, existingGlobalTrackID, localTrackToForward.ID(), localTrackToForward.StreamID(), localTrackToForward.Kind())
+// processSignalQueue processes signals for a single peer sequentially.
+func (pcs *PeerConnectionState) processSignalQueue() {
+	for {
+		pcs.stateLock.Lock()
+		if len(pcs.signalQueue) == 0 {
+			pcs.negotiationInProgress = false
+			pcs.stateLock.Unlock()
+			return
+		}
 
-		if _, err := peerConnection.AddTrack(localTrackToForward); err != nil {
-			log.Printf("[%s] Failed to add existing track %s to new peer: %v", peerID, existingGlobalTrackID, err)
+		signal := pcs.signalQueue[0]
+		pcs.signalQueue = pcs.signalQueue[1:]
+		pcs.stateLock.Unlock()
+
+		switch s := signal.(type) {
+		case offerSignal:
+			pcs.handleOffer(s.sdp)
+		case AnswerSignal:
+			pcs.handleAnswer(s.SDP)
+		case candidateSignal:
+			pcs.handleCandidate(s.candidate)
 		}
 	}
 }
 
-func (s *SFU) setRemoteAndCreateAnswer(peerID string, peerConnection *webrtc.PeerConnection, offer webrtc.SessionDescription) error {
-	log.Println("creating remote SDP")
-	if err := peerConnection.SetRemoteDescription(offer); err != nil {
-		log.Printf("[%s] Failed to set remote description: %v", peerID, err)
-		s.cleanupPeer(peerID)
-		return err
+// handleOffer processes an SDP offer for a peer.
+func (pcs *PeerConnectionState) handleOffer(offer webrtc.SessionDescription) {
+	log.Printf("[%s] Processing SDP offer", pcs.id)
+
+	if err := pcs.peerConnection.SetRemoteDescription(offer); err != nil {
+		log.Printf("[%s] Failed to set remote description: %v", pcs.id, err)
+		pcs.sfu.cleanupPeer(pcs.id)
+		return
 	}
 
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	pcs.sfu.addExistingTracksToPeer(pcs)
 
-	answer, err := peerConnection.CreateAnswer(nil)
+	answer, err := pcs.peerConnection.CreateAnswer(nil)
 	if err != nil {
-		log.Printf("[%s] Failed to create answer: %v", peerID, err)
-		s.cleanupPeer(peerID)
-		return err
+		log.Printf("[%s] Failed to create answer: %v", pcs.id, err)
+		pcs.sfu.cleanupPeer(pcs.id)
+		return
 	}
 
-	log.Println("creating local sdp")
-	if err := peerConnection.SetLocalDescription(answer); err != nil {
-		log.Printf("[%s] Failed to set local description: %v", peerID, err)
-		s.cleanupPeer(peerID)
-		return err
+	if err := pcs.peerConnection.SetLocalDescription(answer); err != nil {
+		log.Printf("[%s] Failed to set local description: %v", pcs.id, err)
+		pcs.sfu.cleanupPeer(pcs.id)
+		return
 	}
 
-	log.Printf("[%s] SDP Answer created and local description set. Sending to signaling server...", peerID)
-	s.signalChannelSend <- &transport.SignalMessage{
-		PeerID: peerID,
+	log.Printf("[%s] SDP Answer created. Sending to client...", pcs.id)
+	pcs.sfu.signalChannelSend <- &transport.SignalMessage{
+		PeerID: pcs.id,
 		Type:   "answer",
 		SDP:    answer.SDP,
 	}
-	return nil
 }
 
-// Handle PeerConnection state changes (e.g., disconnections)
-func (s *SFU) handleConnectionStateChange(peerID string) func(state webrtc.PeerConnectionState) {
+// handleAnswer processes an SDP answer for a peer.
+func (pcs *PeerConnectionState) handleAnswer(answer webrtc.SessionDescription) {
+	log.Printf("[%s] Processing SDP answer", pcs.id)
+
+	// Set the remote description to the answer provided by the client.
+	// This completes the renegotiation initiated by the SFU.
+	if err := pcs.peerConnection.SetRemoteDescription(answer); err != nil {
+		log.Printf("[%s] Failed to set remote description for answer: %v", pcs.id, err)
+		pcs.sfu.cleanupPeer(pcs.id)
+		return
+	}
+
+	log.Printf("[%s] Remote description (answer) set successfully. Negotiation complete.", pcs.id)
+}
+
+// handleCandidate processes an ICE candidate for a peer.
+func (pcs *PeerConnectionState) handleCandidate(candidate webrtc.ICECandidateInit) {
+	if pcs.peerConnection.RemoteDescription() == nil {
+		log.Printf("[%s] Peer connection not ready, requeuing candidate", pcs.id)
+		pcs.stateLock.Lock()
+		// Add it back to the front of the queue
+		pcs.signalQueue = append([]interface{}{candidateSignal{candidate: candidate}}, pcs.signalQueue...)
+		pcs.stateLock.Unlock()
+		return
+	}
+
+	if err := pcs.peerConnection.AddICECandidate(candidate); err != nil {
+		log.Printf("[%s] Error adding ICE candidate: %v", pcs.id, err)
+	} else {
+		log.Printf("[%s] Added ICE candidate from client.", pcs.id)
+	}
+}
+
+// configurePeerConnection sets up all the necessary callbacks for a new peer connection.
+func (s *SFU) configurePeerConnection(pcs *PeerConnectionState) {
+	peerID := pcs.id
+	peerConnection := pcs.peerConnection
+
+	peerConnection.OnNegotiationNeeded(func() {
+		log.Printf("[%s] Negotiation needed, creating new offer...", peerID)
+		offer, err := peerConnection.CreateOffer(nil)
+		if err != nil {
+			log.Printf("[%s] Failed to create negotiation offer: %v", peerID, err)
+			return
+		}
+		if err := peerConnection.SetLocalDescription(offer); err != nil {
+			log.Printf("[%s] Failed to set local description for negotiation: %v", peerID, err)
+			return
+		}
+		s.signalChannelSend <- &transport.SignalMessage{
+			PeerID: peerID,
+			Type:   "offer",
+			SDP:    offer.SDP,
+		}
+	})
+
+	peerConnection.OnTrack(s.handleIncomingTrack(pcs))
+	peerConnection.OnICECandidate(s.handleICECandidate(peerID))
+	peerConnection.OnConnectionStateChange(s.handleConnectionStateChange(peerID))
+
+	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Printf("[%s] ICE Connection State has changed: %s", peerID, state.String())
+	})
+}
+
+// addExistingTracksToPeer adds all currently active tracks to a new peer's connection.
+func (s *SFU) addExistingTracksToPeer(pcs *PeerConnectionState) {
+	s.trackLock.RLock()
+	defer s.trackLock.RUnlock()
+
+	if len(s.trackLocals) == 0 {
+		return
+	}
+
+	log.Printf("[%s] Adding %d existing tracks to new peer connection", pcs.id, len(s.trackLocals))
+	for globalTrackID, localTrack := range s.trackLocals {
+		log.Printf("[%s] Adding existing track %s to new peer", pcs.id, globalTrackID)
+		if _, err := pcs.peerConnection.AddTrack(localTrack); err != nil {
+			log.Printf("[%s] Failed to add existing track %s to new peer: %v", pcs.id, globalTrackID, err)
+		}
+	}
+}
+
+// handleIncomingTrack is called when a remote track is received from a peer.
+func (s *SFU) handleIncomingTrack(pcs *PeerConnectionState) func(*webrtc.TrackRemote, *webrtc.RTPReceiver) {
+	return func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		fmt.Println("ready to process tracks")
+		globalTrackID := fmt.Sprintf("%s_%s_%s", pcs.id, remoteTrack.Kind(), remoteTrack.ID())
+
+		localTrack, err := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
+		if err != nil {
+			log.Printf("[%s] Failed to create local track for forwarding: %v", pcs.id, err)
+			return
+		}
+
+		s.trackLock.Lock()
+		s.trackLocals[globalTrackID] = localTrack
+		s.trackLock.Unlock()
+
+		log.Printf("Created local track %s to forward from peer %s", globalTrackID, pcs.id)
+		s.addTrackToPeers(localTrack, globalTrackID, pcs.id)
+		go s.forwardRTP(pcs.id, globalTrackID, remoteTrack, localTrack)
+	}
+}
+
+// addTrackToPeers adds a new local track to all connected peers except the originator.
+func (s *SFU) addTrackToPeers(localTrack *webrtc.TrackLocalStaticRTP, globalTrackID, originatorPeerID string) {
+	s.peersLock.RLock()
+	defer s.peersLock.RUnlock()
+
+	for otherPeerID, otherPCS := range s.peers {
+		if otherPeerID == originatorPeerID {
+			continue
+		}
+		if _, err := otherPCS.peerConnection.AddTrack(localTrack); err != nil {
+			log.Printf("Failed to add track %s to peer %s: %v", globalTrackID, otherPeerID, err)
+		}
+	}
+}
+
+// forwardRTP reads packets from a remote track and writes them to a local track.
+func (s *SFU) forwardRTP(peerID, globalTrackID string, remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP) {
+	defer func() {
+		log.Printf("Finished forwarding for track %s from peer %s.", globalTrackID, peerID)
+		s.removeTrack(globalTrackID)
+	}()
+
+	rtpBuf := make([]byte, 1500)
+	for {
+		i, _, readErr := remoteTrack.Read(rtpBuf)
+		if readErr != nil {
+			if readErr != io.EOF {
+				log.Printf("Error reading from remote track %s: %v", globalTrackID, readErr)
+			}
+			return
+		}
+
+		// CORRECTED: Call Write on the concrete type *webrtc.TrackLocalStaticRTP
+		if _, writeErr := localTrack.Write(rtpBuf[:i]); writeErr != nil && writeErr != io.ErrClosedPipe {
+			log.Printf("Error writing to local track %s: %v", globalTrackID, writeErr)
+			return
+		}
+	}
+}
+
+// removeTrack cleans up a track from the SFU and all peer connections.
+func (s *SFU) removeTrack(globalTrackID string) {
+	s.trackLock.Lock()
+	trackToRemove, ok := s.trackLocals[globalTrackID]
+	if !ok {
+		s.trackLock.Unlock()
+		return
+	}
+	delete(s.trackLocals, globalTrackID)
+	s.trackLock.Unlock()
+
+	log.Printf("Removed track %s from SFU state", globalTrackID)
+
+	s.peersLock.RLock()
+	defer s.peersLock.RUnlock()
+	for _, pcs := range s.peers {
+		for _, sender := range pcs.peerConnection.GetSenders() {
+			if sender.Track() != nil && sender.Track().ID() == trackToRemove.ID() {
+				if err := pcs.peerConnection.RemoveTrack(sender); err != nil {
+					log.Printf("Error removing track %s from peer %s: %v", globalTrackID, pcs.id, err)
+				}
+			}
+		}
+	}
+}
+
+// handleConnectionStateChange cleans up a peer if the connection fails or closes.
+func (s *SFU) handleConnectionStateChange(peerID string) func(webrtc.PeerConnectionState) {
 	return func(state webrtc.PeerConnectionState) {
 		log.Printf("[%s] Peer Connection State has changed: %s", peerID, state.String())
-		if state == webrtc.PeerConnectionStateFailed ||
-			state == webrtc.PeerConnectionStateClosed ||
-			state == webrtc.PeerConnectionStateDisconnected {
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			s.cleanupPeer(peerID)
 		}
 	}
 }
 
-// Set up ICE candidate handling: send candidates to the remote peer
-func (s *SFU) handleICECandidate(peerID string) func(candidate *webrtc.ICECandidate) {
+// handleICECandidate forwards local ICE candidates to the signaling server.
+func (s *SFU) handleICECandidate(peerID string) func(*webrtc.ICECandidate) {
 	return func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
-			log.Printf("[%s] ICE Candidate gathering complete.", peerID)
-			// Typically, candidates are trickled, so this signals end of gathering.
 			return
 		}
-
 		candidateJSON, err := json.Marshal(candidate.ToJSON())
 		if err != nil {
-			log.Printf("[%s] Error marshalling local ICE candidate: %v", peerID, err)
+			log.Printf("[%s] Error marshalling ICE candidate: %v", peerID, err)
 			return
 		}
-
-		log.Printf("[%s] Sending ICE candidate to client", peerID)
 		s.signalChannelSend <- &transport.SignalMessage{
 			PeerID:    peerID,
 			Type:      "candidate",
@@ -208,156 +357,33 @@ func (s *SFU) handleICECandidate(peerID string) func(candidate *webrtc.ICECandid
 	}
 }
 
-// Set up handling for incoming tracks from this new peer
-func (s *SFU) handleIncomingTrack(peerID string, pcs *PeerConnectionState) func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-	return func(incomingTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		// your existing track handling logic goes here
-		log.Println("came here for received track")
-		trackDetails := fmt.Sprintf("ID=%s, Kind=%s, StreamID=%s, SSRC=%d, Codec=%s",
-			incomingTrack.ID(), incomingTrack.Kind(), incomingTrack.StreamID(), incomingTrack.SSRC(), incomingTrack.Codec().MimeType)
-		log.Printf("[%s] Track received: %s", peerID, trackDetails)
-
-		// Create a unique global ID for this track within the SFU
-		globalTrackID := fmt.Sprintf("%s_%s_%s_%d", peerID, incomingTrack.Kind(), incomingTrack.ID(), incomingTrack.SSRC())
-
-		s.lock.Lock() // Lock for modifying s.trackLocals
-		// Avoid duplicate processing if OnTrack is called multiple times for the same track
-		if _, ok := s.trackLocals[globalTrackID]; ok {
-			s.lock.Unlock()
-			log.Printf("[%s] Track %s (globalID: %s) already being forwarded.", peerID, incomingTrack.ID(), globalTrackID)
-			return
-		}
-
-		// Create a new TrackLocalStaticRTP to forward this track to other peers.
-		// This local track will mimic the properties of the incoming track.
-		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(
-			incomingTrack.Codec().RTPCodecCapability,
-			incomingTrack.ID(),       // Use original track ID for the local track
-			incomingTrack.StreamID(), // Use original stream ID for the local track
-		)
-		if newTrackErr != nil {
-			s.lock.Unlock()
-			log.Printf("[%s] Failed to create TrackLocalStaticRTP for track %s: %v", peerID, incomingTrack.ID(), newTrackErr)
-			return
-		}
-		s.trackLocals[globalTrackID] = localTrack
-		s.lock.Unlock() // Unlock after modifying s.trackLocals
-
-		log.Printf("[%s] Created local track (globalID: %s) to forward remote track %s", peerID, globalTrackID, incomingTrack.ID())
-
-		// Forward this new localTrack to all *other* currently connected peers
-		s.lock.RLock() // Read lock for iterating s.peers
-
-		log.Println("reached here?")
-		for otherPeerID, otherPCS := range s.peers {
-			if otherPeerID == peerID { // Don't send track back to the originator
-				continue
-			}
-			log.Printf("Attempting to add track %s (from %s, globalID: %s) to peer %s", localTrack.ID(), peerID, globalTrackID, otherPeerID)
-			if _, addTrackErr := otherPCS.peerConnection.AddTrack(localTrack); addTrackErr != nil {
-				log.Printf("Failed to add track %s to peer %s: %v", localTrack.ID(), otherPeerID, addTrackErr)
-				// Note: Adding tracks dynamically to an existing peer might require renegotiation (new offer/answer)
-				// with that 'otherPeerID'. For simplicity, this SFU assumes clients can handle new tracks
-				// (which often triggers 'ontrack' on the client side without full SDP exchange if transceivers are set up).
-			} else {
-				log.Printf("Successfully added track %s (from %s) to peer %s", localTrack.ID(), peerID, otherPeerID)
-			}
-		}
-		s.lock.RUnlock()
-
-		// Start a goroutine to read RTP packets from the incoming remote track
-		// and write them to the local track that is being forwarded.
-		go func() {
-			rtpBuf := make([]byte, 1500) // Standard MTU for Ethernet
-			for {
-				i, _, readErr := incomingTrack.Read(rtpBuf)
-				if readErr != nil {
-					if readErr == io.EOF {
-						log.Printf("[%s] Remote track %s (globalID: %s) ended (EOF). Cleaning up.", peerID, incomingTrack.ID(), globalTrackID)
-					} else {
-						log.Printf("[%s] Error reading from remote track %s (globalID: %s): %v", peerID, incomingTrack.ID(), globalTrackID, readErr)
-					}
-					s.removeTrack(globalTrackID) // Clean up the track from SFU
-					return
-				}
-
-				// Write the received RTP packet to the local track (which is then sent to other peers)
-				if _, writeErr := localTrack.Write(rtpBuf[:i]); writeErr != nil && writeErr != io.ErrClosedPipe {
-					log.Printf("[%s] Error writing to local track %s (globalID: %s): %v", peerID, localTrack.ID(), globalTrackID, writeErr)
-					return // Stop forwarding if write fails
-				}
-			}
-		}()
-	}
-}
-
-// removeTrack cleans up a specific track from the SFU's internal state.
-func (s *SFU) removeTrack(globalTrackID string) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	trackToRemove, ok := s.trackLocals[globalTrackID]
-	if !ok {
-		return // Already removed or never existed
-	}
-
-	delete(s.trackLocals, globalTrackID)
-	log.Printf("Removed track %s (globalID: %s) from SFU's trackLocals.", trackToRemove.ID(), globalTrackID)
-
-	// Additionally, attempt to remove this track from all other peers' connections.
-	// This is more complex as it requires finding the RTPSender.
-	// For simplicity, often the client handles track ending, or the peer connection closing cleans this up.
-	// If explicit removal is needed, you'd iterate s.peers, get their RTPSenders,
-	// and call RemoveTrack if a sender is associated with trackToRemove.
-	// Example (conceptual, needs RTPSender tracking):
-	// for _, pcs := range s.peers {
-	// for _, sender := range pcs.peerConnection.GetSenders() {
-	// if sender.Track() != nil && sender.Track().ID() == trackToRemove.ID() && sender.Track().StreamID() == trackToRemove.StreamID() {
-	// if err := pcs.peerConnection.RemoveTrack(sender); err != nil {
-	// log.Printf("Error removing track %s from peer %s: %v", trackToRemove.ID(), pcs.id, err)
-	// } else {
-	// log.Printf("Removed track %s from sender of peer %s", trackToRemove.ID(), pcs.id)
-	// }
-	// }
-	// }
-	// }
-}
-
-// cleanupPeer removes a peer and its associated tracks from the SFU
+// cleanupPeer removes a peer and all of its associated resources.
 func (s *SFU) cleanupPeer(peerID string) {
-	s.lock.Lock() // Full lock for cleanup
-	defer s.lock.Unlock()
-
+	s.peersLock.Lock()
 	pcs, ok := s.peers[peerID]
 	if !ok {
-		log.Printf("Peer %s not found for cleanup or already cleaned up. Here is the peer list", s.peers)
+		s.peersLock.Unlock()
 		return
 	}
-
-	// Close the peer connection
-	if pcs.peerConnection != nil {
-		if err := pcs.peerConnection.Close(); err != nil {
-			log.Printf("[%s] Error closing peer connection: %v", peerID, err)
-		}
-	}
 	delete(s.peers, peerID)
-	log.Printf("Peer %s and its PeerConnection removed.", peerID)
+	s.peersLock.Unlock()
 
-	// Remove tracks published by this peer from s.trackLocals
-	// Iterate over trackLocals and identify tracks by peerID prefix in globalTrackID
-	tracksToRemove := []string{}
+	if err := pcs.peerConnection.Close(); err != nil {
+		log.Printf("[%s] Error closing peer connection: %v", peerID, err)
+	}
+	log.Printf("Peer %s and its connection removed.", peerID)
+
+	s.trackLock.RLock()
+	var tracksToRemove []string
 	for globalTrackID := range s.trackLocals {
-		// Assuming globalTrackID is "peerID_kind_trackID_ssrc"
 		if len(globalTrackID) > len(peerID) && globalTrackID[:len(peerID)] == peerID && globalTrackID[len(peerID)] == '_' {
 			tracksToRemove = append(tracksToRemove, globalTrackID)
 		}
 	}
+	s.trackLock.RUnlock()
 
-	for _, trackIDToRemove := range tracksToRemove {
-		log.Printf("[%s] Removing track %s (originated from this peer) from global trackLocals.", peerID, trackIDToRemove)
-		delete(s.trackLocals, trackIDToRemove)
-		// Note: These tracks are also implicitly removed from other peers when the RTP forwarding goroutine stops (due to EOF or error on the original track).
-		// Explicitly calling RemoveTrack on other peers for these tracks is more robust but adds complexity.
+	for _, trackID := range tracksToRemove {
+		s.removeTrack(trackID)
 	}
-	log.Printf("Cleaned up tracks originated by peer %s.", peerID)
+	log.Printf("Cleaned up all tracks originated by peer %s.", peerID)
 }

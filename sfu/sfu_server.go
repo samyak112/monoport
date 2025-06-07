@@ -105,7 +105,7 @@ func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 	/*NewAPI creates a configured WebRTC API factory from SettingEngine options.
 	Returns an API instance that applies custom settings to all created
 	PeerConnections. Initialize once per application, not per connection.*/
-	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine), webrtc.WithMediaEngine(m))
 
 	return api, udpMux
 }
