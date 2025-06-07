@@ -48,7 +48,9 @@ func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 	reducing NAT mappings and system resource usage.
 
 	2. Another reason and more important reason is I need a way to pass in my own UDP conn which i created
-	in main.go so that i can bypass symmetric NATs*/
+	in main.go so that i can try to bypass symmetric NATs*/
+
+	// added this logger so that i can see the internal logs of pion for debugging
 	logger := &logger.SimpleLogger{}
 	var udpMux = webrtc.NewICEUDPMux(logger, conn)
 	settingEngine.SetICEUDPMux(udpMux)
@@ -73,7 +75,6 @@ func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 
 func RecvAndForwardMediaPackets(webRtcApi *webrtc.API) {
 
-	fmt.Println("reached inside this")
 	_, err := webRtcApi.NewPeerConnection(webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{

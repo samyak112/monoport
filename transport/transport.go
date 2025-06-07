@@ -17,6 +17,8 @@ type PacketInfo struct {
 	N    int
 }
 type CustomPacketConn struct {
+	//embedded udpConn so that i dont need to implement all the methods
+	// and will implement only the method which is necessary i.e ReadFrom
 	*net.UDPConn
 	DataForwardChan chan PacketInfo // Channel to send data out
 }
@@ -35,6 +37,7 @@ func (c *CustomPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 	if c.DataForwardChan != nil {
 		isStunPacket := c.isSTUNPacket(p)
 
+		// channeling only the stun packets back to the main thread
 		if isStunPacket {
 			// IMPORTANT: Make a copy of the data for the channel.
 			// Note: 'p' buffer is reused internally by Pion, so a deep copy is mandatory before sending
@@ -42,17 +45,15 @@ func (c *CustomPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 			copy(dataCopy, p[:n])
 
 			select {
-			// Data info sent successfully
 			case c.DataForwardChan <- PacketInfo{Data: dataCopy, Addr: udpAddr, Err: err, N: n}:
 			default:
 				fmt.Println("Packet dropped because of full channel")
-				// Channel is full, so data is dropped.
-				// This prevents ReadFrom from blocking Pion.
 			}
 		}
 	}
 
 	fmt.Println("packet reached pion")
+	// sent all the packets to pion untouched
 	return n, udpAddr, err
 }
 

@@ -52,7 +52,6 @@ func (s *Signal) ProcessOutgoingSignals() {
 		}
 		if msg.Candidate != "" {
 			// The candidate string is already a JSON of ICECandidateInit
-			// log.Printf("ICE Candidate for %s: %s", msg.PeerID, msg.Candidate)
 			payload := map[string]interface{}{
 				"type":      msg.Type,
 				"candidate": msg.Candidate,
@@ -68,6 +67,5 @@ func (s *Signal) ProcessOutgoingSignals() {
 				break
 			}
 		}
-		// log.Println(">>> END OUTGOING SIGNAL >>>")
 	}
 }

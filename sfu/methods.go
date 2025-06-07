@@ -294,7 +294,6 @@ func (s *SFU) forwardRTP(peerID, globalTrackID string, remoteTrack *webrtc.Track
 			return
 		}
 
-		// CORRECTED: Call Write on the concrete type *webrtc.TrackLocalStaticRTP
 		if _, writeErr := localTrack.Write(rtpBuf[:i]); writeErr != nil && writeErr != io.ErrClosedPipe {
 			log.Printf("Error writing to local track %s: %v", globalTrackID, writeErr)
 			return

@@ -25,23 +25,37 @@ func main() {
 	// using udpAddr to bind the UDP socket or send packets to the given address.
 	udpConn, _ := net.ListenUDP("udp", udpAddr)
 
+	// custom implementation of net.Packetconn so that i can channel the packets back to the main thread
+	// instead of pion having the full access of the port
 	myConn := &transport.CustomPacketConn{UDPConn: udpConn, DataForwardChan: packetChannel}
+
+	// using iceUDPMux function of pion so that i can provide my own
+	// port for UDP instead of pion creating any random port
+	// this is done so that I can multiplex my stun server and sfu server
+	// and channel packets from pion which were meant for my stun server
+	// back to the stun server
 	webRtcApi, iceUDPMux := sfu_server.CreateCustomUDPWebRTCAPI(myConn)
 
 	//passing same signalingChannel in both sfu and signaling struct creation
-	// so that i can send something to the channel from one struct and it can be
+	// so that i can send sdp offers and answers and ice candidates information to the channel from one struct and it can be
 	// received in another , this way i can transfer information from sfu to signaling
 	// by keeping their logic different
 
+	// initializing an instance of SFU
 	sfu := sfu_server.NewSFU(webRtcApi, signalingChannel)
 
 	signaling := &ws.Signal{
 		PeerMap:           make(map[string]*websocket.Conn),
 		SignalChannelRecv: signalingChannel,
 	}
+
+	// running this function here because this is the function which will act as the receiving end
+	// of the channel whenever my sfu would need to send data to frontend it will channel the data through its
+	// channel and the channel in this function will listen to it and will send the data to client
+	// using the conn instance save in the peer map of Signal Struct
 	go signaling.ProcessOutgoingSignals()
 
-	// using a go routine so that the TCP connection is not blocked because of the UDP stream
+	// receives stun packets channeled from pion using the custom implementation of net.packetconn interface
 	go stun_server.HandleStunPackets(udpConn, packetChannel, iceUDPMux)
 
 	//Start WebSocket signaling

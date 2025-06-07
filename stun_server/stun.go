@@ -12,7 +12,6 @@ import (
 
 func HandleStunPackets(conn *net.UDPConn, packetChannel chan transport.PacketInfo, iceUDPMux ice.UDPMux) {
 	fmt.Println("listenint at 5000 for UDP")
-	// buf := make([]byte, 1500)
 	for pktInfo := range packetChannel {
 
 		var udpResponse []byte
@@ -56,6 +55,9 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 		return nil, fmt.Errorf("Error occured in decoding the message", err)
 	}
 
+	// Note : Not handling BindingRequests which contains Message Integrity because
+	// thats not the job of a STUN server, this server is solely here to help a client
+	// know its public address and port
 	if msg.Type == stun.MessageType(stun.BindingRequest) {
 
 		response, err := stun.Build(
@@ -70,14 +72,11 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 			return nil, fmt.Errorf("error building STUN response: %w", err)
 		}
 
-		// log.Println(msg, "this is the packet")
-
 		var buf bytes.Buffer
 		if _, err := response.WriteTo(&buf); err != nil {
 			return nil, fmt.Errorf("error serializing STUN response: %w", err)
 		}
 
-		// fmt.Println("Sending STUN BindingSuccess to", clientAddr)
 		return buf.Bytes(), nil
 
 	} else {
