@@ -29,9 +29,14 @@ func HandleStunPackets(conn *net.UDPConn, packetChannel chan transport.PacketInf
 		}
 
 		udpResponse, err = processStunPacket(pktInfo.N, pktInfo.Addr, dataPacket)
-		_, err = conn.WriteToUDP(udpResponse, remoteAddr)
 		if err != nil {
-			fmt.Println("Error occured in writing UDP response", err)
+			fmt.Println("not sending the stun response")
+		} else {
+
+			_, err = conn.WriteToUDP(udpResponse, remoteAddr)
+			if err != nil {
+				fmt.Println("Error occured in writing UDP response", err)
+			}
 		}
 
 	}
@@ -53,8 +58,6 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 
 	if msg.Type == stun.MessageType(stun.BindingRequest) {
 
-		fmt.Println(msg.Contains(stun.AttrUsername), "asdsad")
-
 		response, err := stun.Build(
 			stun.BindingSuccess,
 			stun.NewTransactionIDSetter(msg.TransactionID),
@@ -67,18 +70,18 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 			return nil, fmt.Errorf("error building STUN response: %w", err)
 		}
 
-		log.Println(msg, "this is the packet")
+		// log.Println(msg, "this is the packet")
 
 		var buf bytes.Buffer
 		if _, err := response.WriteTo(&buf); err != nil {
 			return nil, fmt.Errorf("error serializing STUN response: %w", err)
 		}
 
-		fmt.Println("Sending STUN BindingSuccess to", clientAddr)
+		// fmt.Println("Sending STUN BindingSuccess to", clientAddr)
 		return buf.Bytes(), nil
 
 	} else {
-		fmt.Println("Recieved non Binding", msg.Type)
+		// fmt.Println("Recieved non Binding", msg)
 		return nil, fmt.Errorf("Received non-BindingRequest STUN message typ", msg.Type)
 	}
 }
