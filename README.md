@@ -4,6 +4,8 @@ This is a minimal Selective Forwarding Unit (SFU) implementation built in Go, al
 
 **This project works locally, and the next step is to deploy it and test its behavior in real-world NAT environments.**
 
+**Try running the experiment [here](https://6847fa4070e65a4b9c94bdb5--symphonious-frangollo-9d1ad5.netlify.app/stream)**
+
 ## Problem:
 Most WebRTC systems rely on ICE (Interactive Connectivity Establishment), which uses STUN to discover the public-facing IP and port of a peer behind a NAT, and uses TURN as a fallback relay when direct peer-to-peer connections fail.
 
