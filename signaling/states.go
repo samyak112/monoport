@@ -8,6 +8,7 @@ import (
 
 type Signal struct {
 	PeerMap           map[string]*websocket.Conn
+	UfragMap          map[string]*websocket.Conn
 	SignalLock        sync.Mutex
 	SignalChannelRecv chan *transport.SignalMessage
 }

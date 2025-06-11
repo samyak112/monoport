@@ -44,6 +44,7 @@ func (c *CustomPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 			dataCopy := make([]byte, n)
 			copy(dataCopy, p[:n])
 
+			// fmt.Println("send the packet to stun", dataCopy)
 			select {
 			case c.DataForwardChan <- PacketInfo{Data: dataCopy, Addr: udpAddr, Err: err, N: n}:
 			default:
@@ -52,7 +53,7 @@ func (c *CustomPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 		}
 	}
 
-	fmt.Println("packet reached pion")
+	// fmt.Println("packet reached pion")
 	// sent all the packets to pion untouched
 	return n, udpAddr, err
 }
@@ -71,4 +72,5 @@ type SignalMessage struct {
 	Type      string `json:"type"` // "offer", "answer", "candidate"
 	SDP       string `json:"sdp,omitempty"`
 	Candidate string `json:"candidate,omitempty"` // JSON string of webrtc.ICECandidateInit
+	Ufrag     string `json:"ufrag,omitempty"`
 }

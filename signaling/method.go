@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-func (s *Signal) AddPeer(peerID string, conn *websocket.Conn) {
+func (s *Signal) AddPeer(peerID string, uFrag string, conn *websocket.Conn) {
 	s.SignalLock.Lock()
 	defer s.SignalLock.Unlock()
 
@@ -14,8 +14,11 @@ func (s *Signal) AddPeer(peerID string, conn *websocket.Conn) {
 		s.PeerMap = make(map[string]*websocket.Conn)
 	}
 
-	s.PeerMap[peerID] = conn
-	log.Println(peerID)
+	if uFrag != "" {
+		s.UfragMap[uFrag] = s.PeerMap[peerID]
+	} else {
+		s.PeerMap[peerID] = conn
+	}
 
 }
 
@@ -66,6 +69,10 @@ func (s *Signal) ProcessOutgoingSignals() {
 				log.Println("Write error in Candidate:", err)
 				break
 			}
+		}
+		if msg.Ufrag != "" {
+			log.Println("adding the peer from ufrag")
+			s.AddPeer(msg.PeerID, msg.Ufrag, nil)
 		}
 	}
 }

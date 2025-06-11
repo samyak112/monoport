@@ -76,6 +76,14 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 			sfu:            s,
 			signalQueue:    make([]interface{}, 0),
 		}
+		ufrag, _ := peerConnection.SCTP().Transport().ICETransport().GetLocalParameters()
+
+		log.Printf("Sending Ufrag Data to websocket pipeline to get it updated...")
+		pcs.sfu.signalChannelSend <- &transport.SignalMessage{
+			PeerID: pcs.id,
+			Type:   "ufrag-update",
+			Ufrag:  ufrag.UsernameFragment,
+		}
 		s.peers[peerID] = pcs
 		s.configurePeerConnection(pcs)
 	} else {
@@ -218,7 +226,8 @@ func (s *SFU) configurePeerConnection(pcs *PeerConnectionState) {
 	peerConnection.OnConnectionStateChange(s.handleConnectionStateChange(peerID))
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("[%s] ICE Connection State has changed: %s", peerID, state.String())
+		log.Printf("[%s] ICE Connection State has changed: %s", peerID, state)
+
 	})
 }
 

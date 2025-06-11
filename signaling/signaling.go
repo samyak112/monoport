@@ -32,6 +32,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			return
 		}
 
+		// log.Println(msg)
 		switch msg.Type {
 		case "offer":
 			if msg.PeerID == "" || msg.SDP == "" {
@@ -48,7 +49,10 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			if msg.PeerID == "" || msg.Candidate == "" {
 				log.Println("Invalid candidate message: missing peerId or candidate")
 				return
+			} else {
+				log.Println("recieved a candidate", msg.Candidate)
 			}
+
 			go sfuInstance.HandleIceCandidate(msg.PeerID, msg.Candidate)
 
 		case "answer":
@@ -60,7 +64,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			go sfuInstance.DispatchSignal(msg.PeerID, sfu_server.AnswerSignal{SDP: offer})
 
 		case "join-room":
-			go signalingInstance.AddPeer(msg.PeerID, conn)
+			go signalingInstance.AddPeer(msg.PeerID, "", conn)
 
 		default:
 			log.Printf("Unhandled signaling message type: %s", msg.Type)
