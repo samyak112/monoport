@@ -71,4 +71,5 @@ type SignalMessage struct {
 	Type      string `json:"type"` // "offer", "answer", "candidate"
 	SDP       string `json:"sdp,omitempty"`
 	Candidate string `json:"candidate,omitempty"` // JSON string of webrtc.ICECandidateInit
+	Ufrag     string `json:"ufrag,omitempty"`
 }

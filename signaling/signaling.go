@@ -12,6 +12,7 @@ import (
 
 // Handles incoming WebSocket signaling
 func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.SFU, signalingInstance *Signal) {
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
@@ -29,14 +30,15 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 		var msg transport.SignalMessage
 		if err := json.Unmarshal(rawMessage, &msg); err != nil {
 			log.Printf("Error unmarshalling signaling message: %v. Message: %s", err, rawMessage)
-			return
+			// return
 		}
 
+		// log.Println(msg)
 		switch msg.Type {
 		case "offer":
 			if msg.PeerID == "" || msg.SDP == "" {
 				log.Println("Invalid offer message: missing peerId or sdp")
-				return
+				// return
 			}
 			offer := webrtc.SessionDescription{
 				Type: webrtc.SDPTypeOffer,
@@ -47,8 +49,11 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 		case "ice-candidate":
 			if msg.PeerID == "" || msg.Candidate == "" {
 				log.Println("Invalid candidate message: missing peerId or candidate")
-				return
+				// return
+			} else {
+				log.Println("recieved a candidate", msg.Candidate)
 			}
+
 			go sfuInstance.HandleIceCandidate(msg.PeerID, msg.Candidate)
 
 		case "answer":
@@ -60,7 +65,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 			go sfuInstance.DispatchSignal(msg.PeerID, sfu_server.AnswerSignal{SDP: offer})
 
 		case "join-room":
-			go signalingInstance.AddPeer(msg.PeerID, conn)
+			go signalingInstance.AddPeer(msg.PeerID, "", conn)
 
 		default:
 			log.Printf("Unhandled signaling message type: %s", msg.Type)

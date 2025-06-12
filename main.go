@@ -4,7 +4,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/samyak112/monoport/sfu"
 	"github.com/samyak112/monoport/signaling"
-	"github.com/samyak112/monoport/stun_server"
 	"github.com/samyak112/monoport/transport"
 	"log"
 	"net"
@@ -20,7 +19,7 @@ func main() {
 	signalingChannel := make(chan *transport.SignalMessage, 5)
 
 	// returns a *net.UDPAddr struct representing the UDP network address, using the network type and address
-	udpAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:5000")
+	udpAddr, _ := net.ResolveUDPAddr("udp", ":5000")
 
 	// using udpAddr to bind the UDP socket or send packets to the given address.
 	udpConn, _ := net.ListenUDP("udp", udpAddr)
@@ -46,6 +45,7 @@ func main() {
 
 	signaling := &ws.Signal{
 		PeerMap:           make(map[string]*websocket.Conn),
+		UfragMap:          make(map[string]*websocket.Conn),
 		SignalChannelRecv: signalingChannel,
 	}
 
@@ -56,14 +56,27 @@ func main() {
 	go signaling.ProcessOutgoingSignals()
 
 	// receives stun packets channeled from pion using the custom implementation of net.packetconn interface
-	go stun_server.HandleStunPackets(udpConn, packetChannel, iceUDPMux)
+	go ws.HandleStunPackets(myConn.UDPConn, packetChannel, iceUDPMux, signaling)
 
 	//Start WebSocket signaling
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/sdp", func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Println("Panic in /sdp handler:", err)
+			}
+		}()
+
 		ws.HandleSDP(w, r, sfu, signaling)
 	})
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK\n"))
+	})
+
 	log.Println("Listening on :8000")
-	http.ListenAndServe("127.0.0.1:8000", nil)
+	http.ListenAndServe("0.0.0.0:8000", nil)
 
 }
 
