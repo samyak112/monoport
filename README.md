@@ -48,7 +48,7 @@ Once that STUN packet reached me, I could read the true, working public IP:port 
 
 - **NAT Traversal Initiated by the Client**: The client's browser now has the server's public candidates and begins sending STUN Binding Requests. As these packets traverse the client's symmetric NAT, the NAT establishes a stable public port mapping for this specific client-to-server communication path.
 
-- **Packet Sniffing & Real-time Discovery**: The server's UDP listener receives the STUN request and inspects it to extract the client’s actual public IP and port (from the UDP packet's source) and the `ufrag` (from the STUN payload).
+- **Packet Sniffing & Real-time Discovery**: Now I used `iceudpmux` from Pion library to provide UDP port myself so it blocked it, meaning I cant sniff the packets that Pion is going to recieve, so i wrote an interface of `net.packetConn` which Pion takes as an input and wrote the `ReadFrom` method myself and added a channel in it which returns me all the stun based packet in the main thread. I receive the STUN request through channel and inspects it to extract the client’s actual public IP and port (from the UDP packet's source) and the `ufrag` (from the STUN payload).
 
 - **Injecting the "Magic" Candidate**: When backend recieves the connectivity packet it contains the same `ufrag` that was generated earlier , I extract that from the packet and map it in my hashmap, Now i have the client Address and Port which is specifically opened for ice connectivity and later for relay of media, the server identifies the correct client and constructs a new "server-reflexive" ICE candidate with the discovered IP and port. It "trickles" this new, valid candidate back to the client via WebSocket which we get using `ufrag` lookup.
 
