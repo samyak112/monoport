@@ -37,6 +37,7 @@ func CreateCustomUDPWebRTCAPI(conn net.PacketConn) (*webrtc.API, ice.UDPMux) {
 	However, it doesn't actually do anything by itself - it just stores your preferences we have to call
 	a newAPI function bring this in effect.*/
 	settingEngine := webrtc.SettingEngine{}
+	settingEngine.SetNAT1To1IPs([]string{"34.44.36.231"}, webrtc.ICECandidateTypeHost)
 
 	settingEngine.SetNetworkTypes([]webrtc.NetworkType{
 		webrtc.NetworkTypeUDP4,

@@ -15,7 +15,7 @@ func NewSFU(api *webrtc.API, signalChannel chan *transport.SignalMessage) *SFU {
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
+				URLs: []string{"stun:34.44.36.231:5000"},
 			},
 		},
 	}
@@ -27,6 +27,25 @@ func NewSFU(api *webrtc.API, signalChannel chan *transport.SignalMessage) *SFU {
 		signalChannelSend: signalChannel,
 	}
 }
+
+// func createCustomCandidate() (ice.Candidate, error) {
+// 	ip := net.ParseIP("34.44.36.231")
+// 	udpAddr := &net.UDPAddr{
+// 		IP:   ip,
+// 		Port: 5000,
+// 	}
+//
+// 	cand, err := ice.NewCandidateServerReflexive(&ice.CandidateServerReflexiveConfig{
+// 		Network:    "udp",
+// 		Address:    "34.44.36.231", // Your SFU's public IP
+// 		Port:       5000,           // Your SFU's port
+// 		Component:  1,
+// 		Foundation: "sfu1",
+// 		Priority:   1694498815,
+// 		// RelAddr and RelPort can be omitted
+// 	})
+// 	return ice.NewCandidateHost(&candidateCfg)
+// }
 
 // dispatchSignal adds a signal to the peer's queue and starts the processing loop if not already running.
 func (s *SFU) DispatchSignal(peerID string, signal interface{}) {
@@ -76,14 +95,7 @@ func (s *SFU) HandleNewPeerOffer(peerID string, offer webrtc.SessionDescription)
 			sfu:            s,
 			signalQueue:    make([]interface{}, 0),
 		}
-		ufrag, _ := peerConnection.SCTP().Transport().ICETransport().GetLocalParameters()
 
-		log.Printf("Sending Ufrag Data to websocket pipeline to get it updated...")
-		pcs.sfu.signalChannelSend <- &transport.SignalMessage{
-			PeerID: pcs.id,
-			Type:   "ufrag-update",
-			Ufrag:  ufrag.UsernameFragment,
-		}
 		s.peers[peerID] = pcs
 		s.configurePeerConnection(pcs)
 	} else {
@@ -157,6 +169,14 @@ func (pcs *PeerConnectionState) handleOffer(offer webrtc.SessionDescription) {
 		return
 	}
 
+	ufrag, _ := pcs.peerConnection.SCTP().Transport().ICETransport().GetLocalParameters()
+
+	log.Printf("Sending Ufrag Data to websocket pipeline to get it updated...")
+	pcs.sfu.signalChannelSend <- &transport.SignalMessage{
+		PeerID: pcs.id,
+		Type:   "ufrag-update",
+		Ufrag:  ufrag.UsernameFragment,
+	}
 	log.Printf("[%s] SDP Answer created. Sending to client...", pcs.id)
 	pcs.sfu.signalChannelSend <- &transport.SignalMessage{
 		PeerID: pcs.id,

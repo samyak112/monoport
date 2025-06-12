@@ -50,14 +50,9 @@ func HandleStunPackets(conn *net.UDPConn, packetChannel chan transport.PacketInf
 					log.Println("JSON marshal error in stun:", err)
 					break
 				}
-
-				fmt.Println(signalingInstance.UfragMap)
-				if err := signalingInstance.UfragMap[ufrag].WriteMessage(1, data); err != nil {
-					log.Println("Write error in sending SDP:", err)
-					break
-				} else {
-					fmt.Println("sent stun candidate via signaling")
-				}
+				fmt.Println("derefencing below")
+				fmt.Println(*signalingInstance.UfragMap[ufrag])
+				signalingInstance.SendCandidate(ufrag, data)
 			} else {
 				if err != nil {
 					fmt.Println("not sending the stun response")
@@ -127,7 +122,7 @@ func processStunPacket(numBytes int, clientAddr *net.UDPAddr, buffer []byte) ([]
 			return nil, "", "", fmt.Errorf("error serializing STUN response: %w", err)
 		}
 
-		// fmt.Println("got stun message", msg.Type)
+		fmt.Println("got stun message", ufrag)
 		return buf.Bytes(), ufrag, msgType, nil
 
 	} else {

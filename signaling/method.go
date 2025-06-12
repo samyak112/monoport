@@ -15,7 +15,11 @@ func (s *Signal) AddPeer(peerID string, uFrag string, conn *websocket.Conn) {
 	}
 
 	if uFrag != "" {
-		s.UfragMap[uFrag] = s.PeerMap[peerID]
+		connInstance := s.PeerMap[peerID]
+		if connInstance == nil {
+			log.Println("yep it was nil")
+		}
+		s.UfragMap[uFrag] = connInstance
 	} else {
 		s.PeerMap[peerID] = conn
 	}
@@ -28,6 +32,19 @@ func (s *Signal) RemovePeer(peerID string) {
 
 	if s.PeerMap != nil {
 		delete(s.PeerMap, peerID)
+	}
+}
+
+func (s *Signal) SendCandidate(ufrag string, data []byte) {
+	log.Println(s)
+
+	log.Println("going to send the custom cand", ufrag)
+	log.Println("this is the value", *s.UfragMap[ufrag])
+
+	if err2 := s.UfragMap[ufrag].WriteMessage(1, data); err2 != nil {
+		log.Println("Write error in sending SDP:", err2)
+	} else {
+		log.Println("sent stun candidate via signaling")
 	}
 }
 

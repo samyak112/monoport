@@ -12,6 +12,7 @@ import (
 
 // Handles incoming WebSocket signaling
 func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.SFU, signalingInstance *Signal) {
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
