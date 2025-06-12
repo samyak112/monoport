@@ -4,7 +4,7 @@ This is a minimal Selective Forwarding Unit (SFU) implementation built in Go, al
 
 **This project works locally, and the next step is to deploy it and test its behavior in real-world NAT environments.**
 
-**Try running the experiment [here](https://6847fa4070e65a4b9c94bdb5--symphonious-frangollo-9d1ad5.netlify.app/stream)**
+**Try running the experiment [here](https://684ac13d0549b02e98b3e0a4--symphonious-frangollo-9d1ad5.netlify.app/stream)**
 
 **Update** - Its working with symmetric NAT need to do more tests
 
