@@ -39,7 +39,7 @@ func (s *Signal) SendCandidate(ufrag string, data []byte) {
 	log.Println(s)
 
 	log.Println("going to send the custom cand", ufrag)
-	log.Println("this is the value", *s.UfragMap[ufrag])
+	// log.Println("this is the value", *s.UfragMap[ufrag])
 
 	if err2 := s.UfragMap[ufrag].WriteMessage(1, data); err2 != nil {
 		log.Println("Write error in sending SDP:", err2)

@@ -4,7 +4,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/samyak112/monoport/sfu"
 	"github.com/samyak112/monoport/signaling"
-	"github.com/samyak112/monoport/stun_server"
 	"github.com/samyak112/monoport/transport"
 	"log"
 	"net"
@@ -57,7 +56,7 @@ func main() {
 	go signaling.ProcessOutgoingSignals()
 
 	// receives stun packets channeled from pion using the custom implementation of net.packetconn interface
-	go stun_server.HandleStunPackets(myConn.UDPConn, packetChannel, iceUDPMux, signaling)
+	go ws.HandleStunPackets(myConn.UDPConn, packetChannel, iceUDPMux, signaling)
 
 	//Start WebSocket signaling
 	http.HandleFunc("/sdp", func(w http.ResponseWriter, r *http.Request) {

@@ -30,7 +30,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 		var msg transport.SignalMessage
 		if err := json.Unmarshal(rawMessage, &msg); err != nil {
 			log.Printf("Error unmarshalling signaling message: %v. Message: %s", err, rawMessage)
-			return
+			// return
 		}
 
 		// log.Println(msg)
@@ -38,7 +38,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 		case "offer":
 			if msg.PeerID == "" || msg.SDP == "" {
 				log.Println("Invalid offer message: missing peerId or sdp")
-				return
+				// return
 			}
 			offer := webrtc.SessionDescription{
 				Type: webrtc.SDPTypeOffer,
@@ -49,7 +49,7 @@ func HandleSDP(w http.ResponseWriter, r *http.Request, sfuInstance *sfu_server.S
 		case "ice-candidate":
 			if msg.PeerID == "" || msg.Candidate == "" {
 				log.Println("Invalid candidate message: missing peerId or candidate")
-				return
+				// return
 			} else {
 				log.Println("recieved a candidate", msg.Candidate)
 			}
