@@ -2,7 +2,7 @@
 
 This is a minimal Selective Forwarding Unit (SFU) implementation built in Go, along with a [React-based frontend](https://github.com/samyak112/streamio-frontend), aimed at exploring a key networking challenge in WebRTC: media flow through symmetric NATs. 
 
-**Try running the experiment [here](https://684ac13d0549b02e98b3e0a4--symphonious-frangollo-9d1ad5.netlify.app/stream)**
+**Try running the experiment [here](https://684bf6dca8dcba9445e497bc--symphonious-frangollo-9d1ad5.netlify.app/stream)**
 
 **Update** - Its working with symmetric NAT need to do more tests
 
