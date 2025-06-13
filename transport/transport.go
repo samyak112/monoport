@@ -52,7 +52,7 @@ func (c *CustomPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 		}
 	}
 
-	fmt.Println("packet reached pion")
+	// fmt.Println("packet reached pion")
 	// sent all the packets to pion untouched
 	return n, udpAddr, err
 }

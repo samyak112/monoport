@@ -98,7 +98,6 @@ func HandleStunPackets(conn *net.UDPConn, packetChannel chan transport.PacketInf
 		} else {
 
 			// _, err = conn.WriteToUDP(udpResponse, remoteAddr)
-
 			if msgType == "messageIntegrity" {
 				payload := map[string]interface{}{
 					"type":          "stun-candidate",
